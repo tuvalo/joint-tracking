@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Real-Time Motion & Joint Tracker (33-Node MVP)</title>
+  
+  <!-- Tailwind CSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0f9ff',
+              500: '#0ea5e9',
+              600: '#0284c7',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- MediaPipe Tasks-Vision CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.js" crossorigin="anonymous"></script>
+
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="h-full flex flex-col overflow-hidden font-sans antialiased select-none">
+
+  <!-- Top App Navigation Bar -->
+  <header class="h-14 border-b border-slate-800 bg-slate-900/90 px-4 flex items-center justify-between shrink-0 z-30 backdrop-blur-md">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-sky-400">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+        </svg>
+      </div>
+      <div>
+        <h1 class="text-sm font-bold tracking-tight text-slate-100 flex items-center gap-2">
+          JointsTracker <span class="text-[10px] bg-sky-500/20 text-sky-400 border border-sky-500/30 px-1.5 py-0.5 rounded font-mono">33-Node MVP</span>
+        </h1>
+        <p class="text-[11px] text-slate-400">Client-Side MediaPipe Pose Telemetry</p>
+      </div>
+    </div>
+
+    <!-- Center Status & Metrics -->
+    <div class="hidden sm:flex items-center gap-3">
+      <div id="trackingStatusBadge" class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wider border bg-slate-800 text-slate-400 border-slate-700">
+        INITIALIZING
+      </div>
+      <div class="h-4 w-[1px] bg-slate-800"></div>
+      <div class="text-xs text-slate-400 flex items-center gap-1.5 font-mono">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 live-indicator"></span>
+        <span id="fpsCounterText" class="text-emerald-400 font-bold">0.0 FPS</span>
+      </div>
+      <div class="h-4 w-[1px] bg-slate-800"></div>
+      <div class="text-xs text-slate-400 flex items-center gap-1 font-mono">
+        <span>Latency:</span>
+        <span id="latencyText" class="text-emerald-400 font-bold">0 ms</span>
+      </div>
+      <div class="h-4 w-[1px] bg-slate-800"></div>
+      <div class="text-[11px] text-slate-400 font-mono">
+        <span id="videoResolutionText">-- × --</span>
+      </div>
+    </div>
+
+    <!-- Controls Toolbar -->
+    <div class="flex items-center gap-2">
+      <!-- Camera switcher dropdown (visible if >1 camera) -->
+      <div class="hidden">
+        <select id="cameraDeviceSelect" class="bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-sky-500">
+        </select>
+      </div>
+
+      <!-- Mirror toggle -->
+      <button id="mirrorToggleBtn" title="Toggle Mirror View" class="px-2.5 py-1.5 bg-sky-500/20 text-sky-300 border border-sky-500/40 rounded-lg text-xs font-medium hover:bg-sky-500/30 transition flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+        </svg>
+        <span>Mirror</span>
+      </button>
+
+      <!-- Reset Sticky Lock -->
+      <button id="resetLockBtn" title="Reset Sticky Person Target Lock" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-xs font-medium transition flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        <span class="hidden md:inline">Re-lock Target</span>
+      </button>
+
+      <!-- Pause / Freeze Frame Button -->
+      <button id="pauseToggleBtn" class="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-semibold shadow-md transition flex items-center gap-1.5">
+        <svg id="pauseBtnIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        <span id="pauseBtnText">Pause & Freeze</span>
+        <span class="hidden lg:inline text-[10px] bg-black/20 px-1 py-0.5 rounded font-mono ml-0.5">Space</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Content Layout -->
+  <main class="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
+
+    <!-- Left / Center: Video Feed & Canvas Overlay -->
+    <div class="flex-1 flex flex-col p-4 bg-slate-950 overflow-hidden">
+      <div class="video-canvas-container flex-1 flex items-center justify-center border border-slate-800 shadow-2xl relative">
+
+        <!-- Live Video Element (Default mirrored via Tailwind) -->
+        <video id="webcamVideo" autoplay playsinline muted class="scale-x-[-1]"></video>
+
+        <!-- Skeleton Wireframe Canvas Overlay -->
+        <canvas id="skeletonCanvas"></canvas>
+
+        <!-- Model Loading Overlay -->
+        <div id="modelLoadingOverlay" class="absolute inset-0 bg-slate-950/90 z-20 flex flex-col items-center justify-center p-6 transition-opacity duration-300">
+          <div class="w-12 h-12 border-4 border-sky-500/20 border-t-sky-400 rounded-full animate-spin mb-4"></div>
+          <div id="loadingStatusText" class="text-sm font-medium text-slate-200">Initializing MediaPipe Vision Tasks...</div>
+          <p class="text-xs text-slate-400 mt-2 text-center max-w-sm">Loading WebAssembly binaries & neural pose model directly in your browser.</p>
+        </div>
+
+        <!-- Camera Permission / Error Fallback Overlay -->
+        <div id="cameraErrorContainer" class="absolute inset-0 bg-slate-950/95 z-30 flex items-center justify-center p-6 hidden">
+        </div>
+      </div>
+
+      <!-- Bottom Visual Legend & Status -->
+      <div class="h-9 mt-3 flex items-center justify-between text-[11px] text-slate-400 px-1">
+        <div class="flex items-center gap-4">
+          <span class="font-medium text-slate-500 uppercase tracking-wider text-[10px]">Wireframe Topology:</span>
+          <div class="flex items-center gap-1.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-sky-400"></span>
+            <span>Face (0–10)</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+            <span>Upper Body (11–22)</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-purple-400"></span>
+            <span>Lower Body (23–32)</span>
+          </div>
+        </div>
+        <div class="hidden md:flex items-center gap-2 text-slate-500">
+          <span>Sticky Multi-Person Matrix active</span>
+          <span>•</span>
+          <span>Hover a row to highlight joint</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Sidebar: 33-Node Telemetry Panel -->
+    <div class="w-full lg:w-[460px] xl:w-[500px] border-t lg:border-t-0 lg:border-l border-slate-800 bg-slate-900/60 flex flex-col shrink-0 overflow-hidden backdrop-blur-sm">
+      
+      <!-- Panel Header & Tabs -->
+      <div class="h-12 border-b border-slate-800 px-4 flex items-center justify-between shrink-0 bg-slate-900/80">
+        <div class="flex items-center gap-4">
+          <button id="tabTableBtn" class="text-xs font-semibold text-sky-400 border-b-2 border-sky-400 py-3 transition">
+            Joint Telemetry (33)
+          </button>
+          <button id="tabJsonBtn" class="text-xs font-medium text-slate-400 hover:text-slate-200 py-3 transition">
+            Raw JSON Inspector
+          </button>
+        </div>
+
+        <button id="copyJsonBtn" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded text-[11px] font-medium transition flex items-center gap-1">
+          <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/>
+          </svg>
+          Copy JSON
+        </button>
+      </div>
+
+      <!-- Category Filter Toolbar -->
+      <div class="px-4 py-2 border-b border-slate-800/80 bg-slate-950/40 flex items-center gap-1.5 shrink-0 overflow-x-auto">
+        <button data-category="all" class="category-filter-pill px-2.5 py-1 rounded text-[11px] font-medium bg-sky-500 text-white transition">
+          All (33)
+        </button>
+        <button data-category="facial_nodes" class="category-filter-pill px-2.5 py-1 rounded text-[11px] font-medium bg-slate-800 text-slate-400 hover:text-slate-200 transition">
+          Face (11)
+        </button>
+        <button data-category="upper_body" class="category-filter-pill px-2.5 py-1 rounded text-[11px] font-medium bg-slate-800 text-slate-400 hover:text-slate-200 transition">
+          Upper Body (12)
+        </button>
+        <button data-category="lower_body" class="category-filter-pill px-2.5 py-1 rounded text-[11px] font-medium bg-slate-800 text-slate-400 hover:text-slate-200 transition">
+          Lower Body (10)
+        </button>
+      </div>
+
+      <!-- Tab Content 1: Dense Coordinate Table -->
+      <div id="telemetryTableWrapper" class="flex-1 overflow-y-auto overflow-x-hidden relative">
+        <!-- Rendered dynamically by TelemetryManager -->
+      </div>
+
+      <!-- Tab Content 2: Raw JSON Inspector -->
+      <div id="jsonViewerWrapper" class="flex-1 overflow-auto p-3 hidden bg-slate-950 font-mono text-[11px] text-emerald-400">
+        <pre id="jsonTelemetryViewer" class="whitespace-pre"></pre>
+      </div>
+
+      <!-- Bottom Developer Inspection Hint -->
+      <div class="h-8 border-t border-slate-800 bg-slate-950 px-3 flex items-center justify-between text-[10px] text-slate-500 font-mono shrink-0">
+        <span class="truncate">window.currentMotionTelemetry</span>
+        <span class="text-slate-400">window.isExecutionPaused</span>
+      </div>
+    </div>
+  </main>
+
+  <!-- Notification Toast -->
+  <div id="actionToast" class="fixed bottom-5 left-1/2 -translate-x-1/2 bg-slate-900 border border-slate-700 text-slate-200 text-xs px-4 py-2 rounded-lg shadow-2xl pointer-events-none opacity-0 transition-opacity duration-200 z-50">
+  </div>
+
+  <!-- Main ES Module Script -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
